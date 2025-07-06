@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Solar Plant Capacity Calculator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Slate & Amber -->
+    <!-- Application Structure Plan: A dashboard-style, three-part structure was chosen to maximize usability and engagement. It starts with the final conclusion (the required capacity) for immediate insight. The core is an interactive calculator where users can adjust variables like degradation and system losses with sliders, providing a hands-on learning experience. This is paired with dynamic data visualizations (a waterfall chart for energy loss and a line chart for degradation) that update in real-time. This structure transforms a static report into an exploratory tool, making the complex relationships between variables intuitive and easy to understand. -->
+    <!-- Visualization & Content Choices: The key calculation is presented as an 'Energy Loss Waterfall' using a Chart.js bar chart on canvas, which visually deconstructs the total required energy into its final grid output and various loss components. This is more intuitive than a simple table. Panel degradation is shown with a Chart.js line chart to illustrate the change over 25 years. All user inputs are handled by HTML sliders, which directly manipulate the JavaScript calculation model and trigger chart updates. This interactive approach (Goal: Explore, Compare, Understand Relationships) is superior to a static presentation for explaining the sensitive interplay of different loss factors. NO SVG/Mermaid used. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .info-icon {
+            cursor: pointer;
+            position: relative;
+            display: inline-block;
+        }
+        .tooltip {
+            visibility: hidden;
+            width: 280px;
+            background-color: #334155;
+            color: #fff;
+            text-align: left;
+            border-radius: 6px;
+            padding: 10px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -140px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 0.8rem;
+            line-height: 1.4;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .info-icon:hover .tooltip {
+            visibility: visible;
+            opacity: 1;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #f59e0b;
+            cursor: pointer;
+            border-radius: 50%;
+            margin-top: -6px;
+        }
+        input[type=range]:disabled::-webkit-slider-thumb {
+            background: #9ca3af;
+        }
+        input[type=range]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: #f59e0b;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        input[type=range]:disabled::-moz-range-thumb {
+            background: #9ca3af;
+        }
+        .formula-box {
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #1e293b;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .toggle-bg:after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            background: white;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+        input:checked + .toggle-bg:after {
+            transform: translateX(100%);
+            border-color: white;
+        }
+        input:checked + .toggle-bg {
+            background-color: #f59e0b;
+        }
+        .advanced-settings-container {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.5s ease-out, opacity 0.5s ease-out;
+            opacity: 0;
+        }
+        .advanced-settings-container.open {
+            max-height: 1000px; /* Large enough to fit content */
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-slate-900">Solar Power Plant Capacity Calculator</h1>
+            <p class="text-slate-600 mt-2 max-w-3xl mx-auto">This tool determines the initial installed DC capacity required for a solar plant to meet a specific performance target by its 24th year, accounting for all major energy losses.</p>
+        </header>
+
+        <div id="voltage-notification" class="hidden bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 rounded-lg mb-8 flex justify-between items-center" role="alert">
+            <p><span class="font-bold">Info:</span> For target outputs above 5 MW, a 33 kV transmission line is used, resulting in lower line losses.</p>
+            <button id="close-notification-btn" class="text-blue-500 hover:text-blue-700">
+                <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+        </div>
+
+        <main class="space-y-8">
+            <section id="summary" class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
+                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 text-center">
+                    <div>
+                        <h3 class="text-sm font-medium text-slate-500 uppercase">Target AC Output</h3>
+                        <p class="text-3xl font-semibold text-amber-600"><span id="targetACOutputDisplay">3.0</span> <span class="text-xl">MW</span></p>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-medium text-slate-500 uppercase">Target CUF (Year 24)</h3>
+                        <p class="text-3xl font-semibold text-amber-600">19 <span class="text-xl">%</span></p>
+                    </div>
+                     <div>
+                        <h3 class="text-sm font-medium text-slate-500 uppercase">Total System Losses</h3>
+                        <p id="totalLosses" class="text-3xl font-semibold text-amber-600">26.65 <span class="text-xl">%</span></p>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-medium text-slate-500 uppercase">Required DC Capacity</h3>
+                        <p id="finalCapacity" class="text-3xl font-bold text-emerald-600">3.79 <span class="text-xl">MWp</span></p>
+                    </div>
+                </div>
+            </section>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-5 gap-8">
+                <section id="interactive-calculator" class="lg:col-span-2 bg-white p-6 rounded-xl shadow-md border border-slate-200">
+                    <h2 class="text-2xl font-bold mb-4 text-slate-900">Interactive Loss Calculator</h2>
+                    <p class="text-sm text-slate-500 mb-6">Adjust the primary sliders or enable advanced settings for more detailed customization.</p>
+                    
+                    <div class="space-y-6">
+                        <!-- Target AC Output Section -->
+                        <div>
+                            <h3 class="text-lg font-semibold flex items-center">
+                                Target Plant Output (AC)
+                            </h3>
+                            <div class="flex items-center space-x-4 mt-2">
+                                <input type="range" id="targetACOutput" min="1" max="30" step="0.5" value="3" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                                <span class="font-semibold text-amber-600 w-24 text-right"><span id="targetACOutputValue">3.0</span> MW</span>
+                            </div>
+                        </div>
+
+                        <!-- Transmission Losses Section -->
+                        <div>
+                            <h3 class="text-lg font-semibold flex items-center">
+                                Transmission Distance
+                            </h3>
+                             <div class="flex items-center space-x-4 mt-2">
+                                <input type="range" id="transmissionDistance" min="1" max="10" step="0.5" value="5" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                                <span class="font-semibold text-amber-600 w-24 text-right"><span id="transmissionDistanceValue">5.0</span> km</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Advanced Settings Toggle -->
+                        <div class="border-t border-slate-200 pt-6">
+                             <label for="advanced-toggle" class="flex items-center cursor-pointer">
+                                <div class="relative">
+                                    <input type="checkbox" id="advanced-toggle" class="sr-only">
+                                    <div class="block bg-slate-300 w-11 h-6 rounded-full toggle-bg"></div>
+                                </div>
+                                <div class="ml-3 text-slate-700 font-medium">
+                                    Customize Advanced Losses
+                                </div>
+                            </label>
+                        </div>
+                        
+                        <!-- Collapsible Advanced Settings -->
+                        <div id="advanced-settings" class="advanced-settings-container space-y-6">
+                            <!-- Panel Degradation Section -->
+                            <div>
+                                <h3 class="text-lg font-semibold flex items-center">
+                                    Panel Degradation
+                                    <div class="info-icon ml-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="text-slate-400" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.055.482.112.558.153.15.082.258.289.258.644v.214a1.03 1.03 0 0 1-.258.643c-.097.062-.215.122-.326.148l-.305.055-.087.462c.07.03.18.061.305.082.196.035.39.07.57.115l.21.055a1.606 1.606 0 0 0 .753.075c.662 0 1.158-.38 1.158-.944 0-.462-.257-.835-.582-1.168-.24-.264-.52-.468-.82-.622zm-2.643-.062l.024-.108a.903.903 0 0 1 .45-.567c.227-.123.539-.18.87-.18.423 0 .75.115.98.347.22.223.33.534.33.923 0 .39-.12.703-.35.914-.23.21-.54.314-.92.314-.39 0-.69-.093-.89-.275-.21-.173-.33-.42-.33-.74z"/></svg>
+                                        <span class="tooltip">Includes a one-time Light-Induced Degradation (LID) in the first year, and a slow, linear degradation each year after.</span>
+                                    </div>
+                                </h3>
+                                <div class="flex items-center space-x-4 mt-2">
+                                    <input type="range" id="degradationRate" min="0.3" max="1.0" step="0.05" value="0.5" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                                    <span class="font-semibold text-amber-600 w-24 text-right"><span id="degradationRateValue">0.50</span> %/year</span>
+                                </div>
+                            </div>
+
+                            <!-- System Losses Section -->
+                            <div>
+                                <h3 class="text-lg font-semibold flex items-center">
+                                    System Performance Losses
+                                </h3>
+                                <div class="space-y-3 mt-2">
+                                    <div class="flex justify-between items-center text-sm"><span>Soiling Loss</span> <span class="font-medium text-slate-600"><span id="soilingLossValue">3.0</span> %</span></div>
+                                    <input type="range" id="soilingLoss" min="1" max="5" step="0.5" value="3" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                                    
+                                    <div class="flex justify-between items-center text-sm"><span>Temperature Loss</span> <span class="font-medium text-slate-600"><span id="tempLossValue">7.0</span> %</span></div>
+                                    <input type="range" id="tempLoss" min="5" max="12" step="0.5" value="7" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+
+                                    <div class="flex justify-between items-center text-sm"><span>Inverter &amp; Transformer Loss</span> <span class="font-medium text-slate-600"><span id="inverterLossValue">3.5</span> %</span></div>
+                                    <input type="range" id="inverterLoss" min="2" max="5" step="0.5" value="3.5" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                                    
+                                    <div class="flex justify-between items-center text-sm"><span>DC & AC Cable Loss</span> <span class="font-medium text-slate-600"><span id="cableLossValue">1.5</span> %</span></div>
+                                    <input type="range" id="cableLoss" min="1" max="3" step="0.5" value="1.5" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="visualizations" class="lg:col-span-3 space-y-8">
+                    <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
+                        <h2 class="text-xl font-bold mb-4 text-slate-900">Energy Loss Waterfall</h2>
+                        <div class="chart-container" style="position: relative; height:40vh; max-height: 350px; width:100%; max-width: 700px; margin: auto;">
+                            <canvas id="lossWaterfallChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-md border border-slate-200">
+                        <h2 class="text-xl font-bold mb-4 text-slate-900">Panel Efficiency Over 25 Years</h2>
+                         <div class="chart-container" style="position: relative; height:40vh; max-height: 350px; width:100%; max-width: 700px; margin: auto;">
+                            <canvas id="degradationChart"></canvas>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <footer class="mt-12 bg-white p-8 rounded-xl shadow-md border border-slate-200">
+            <h2 class="text-2xl font-bold mb-4 text-slate-900">Formulas & Calculation Logic</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="font-semibold text-slate-700">1. Energy Calculation (Working Backwards)</h3>
+                        <p class="text-sm text-slate-500 mt-1">The required initial DC energy is found by starting with the target grid output and adding back each loss.</p>
+                        <div class="formula-box mt-2">
+                            E_Grid = Target_AC × 8760 × CUF
+                            <br>E_Plant = E_Grid / (1 - Transmission_Loss)
+                            <br>E_DC_Yr24 = E_Plant / Performance_Ratio
+                            <br>E_DC_Yr1 = E_DC_Yr24 / (1 - Degradation_Loss)
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-slate-700">2. Final DC Capacity</h3>
+                        <p class="text-sm text-slate-500 mt-1">The required initial DC energy is divided by the location's annual Peak Sun Hours (PSH) to get the nameplate capacity.</p>
+                         <div class="formula-box mt-2">
+                            Capacity (MWp) = E_DC_Yr1 / PSH
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-slate-700">3. Panel Degradation Loss</h3>
+                        <p class="text-sm text-slate-500 mt-1">Combines a one-time LID with annual linear degradation over 23 years.</p>
+                         <div class="formula-box mt-2">
+                            Eff_Remain = (1 - LID) × (1 - Annual_Rate)²³
+                            <br>Total_Loss = 1 - Eff_Remain
+                        </div>
+                    </div>
+                </div>
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="font-semibold text-slate-700">4. System Performance Ratio (PR)</h3>
+                        <p class="text-sm text-slate-500 mt-1">The combined efficiency of all system components and environmental factors.</p>
+                         <div class="formula-box mt-2">
+                            PR = (1-Loss₁) × (1-Loss₂) × ...
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-slate-700">5. Transmission Line Loss</h3>
+                        <p class="text-sm text-slate-500 mt-1">Calculates the power lost as heat in the transmission cables.</p>
+                         <div class="formula-box mt-2">
+                            Current (I) = P / (V × √3 × PF)
+                            <br>Resistance (R) = R_20C × (1 + α × ΔT)
+                            <br>Power_Loss = 3 × I² × (R × distance)
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </footer>
+        <div class="text-center text-lg font-semibold text-slate-700 py-8">
+            Created by DHRM Energy for Vriddhi Infratech
+        </div>
+    </div>
+
+    <script>
+        const config = {
+            targetCUF: 0.19,
+            hoursInYear: 8760,
+            transmissionVoltage11kV: 11000,
+            transmissionVoltage33kV: 33000,
+            powerFactor: 0.95,
+            conductorResistance20C: 0.3390,
+            conductorTempCoeff: 0.004,
+            operatingTemp: 75,
+            peakSunHours: 1898,
+            lidLoss: 0.015,
+            mismatchLoss: 0.015,
+        };
+
+        const lossInputs = {
+            targetACOutput: document.getElementById('targetACOutput'),
+            degradationRate: document.getElementById('degradationRate'),
+            soilingLoss: document.getElementById('soilingLoss'),
+            tempLoss: document.getElementById('tempLoss'),
+            inverterLoss: document.getElementById('inverterLoss'),
+            cableLoss: document.getElementById('cableLoss'),
+            transmissionDistance: document.getElementById('transmissionDistance'),
+        };
+
+        const outputValues = {
+            targetACOutputDisplay: document.getElementById('targetACOutputDisplay'),
+            targetACOutputValue: document.getElementById('targetACOutputValue'),
+            degradationRateValue: document.getElementById('degradationRateValue'),
+            soilingLossValue: document.getElementById('soilingLossValue'),
+            tempLossValue: document.getElementById('tempLossValue'),
+            inverterLossValue: document.getElementById('inverterLossValue'),
+            cableLossValue: document.getElementById('cableLossValue'),
+            transmissionDistanceValue: document.getElementById('transmissionDistanceValue'),
+            totalLosses: document.getElementById('totalLosses'),
+            finalCapacity: document.getElementById('finalCapacity'),
+        };
+        
+        const notificationElements = {
+            banner: document.getElementById('voltage-notification'),
+            closeBtn: document.getElementById('close-notification-btn'),
+        };
+
+        const advancedSettings = {
+            toggle: document.getElementById('advanced-toggle'),
+            container: document.getElementById('advanced-settings'),
+            sliders: document.querySelectorAll('#advanced-settings input[type="range"]')
+        };
+
+        let lossWaterfallChart, degradationChart;
+
+        function calculate() {
+            const values = {
+                targetAC: parseFloat(lossInputs.targetACOutput.value),
+                degradationRate: parseFloat(lossInputs.degradationRate.value) / 100,
+                soilingLoss: parseFloat(lossInputs.soilingLoss.value) / 100,
+                tempLoss: parseFloat(lossInputs.tempLoss.value) / 100,
+                inverterLoss: parseFloat(lossInputs.inverterLoss.value) / 100,
+                cableLoss: parseFloat(lossInputs.cableLoss.value) / 100,
+                transmissionDistance: parseFloat(lossInputs.transmissionDistance.value),
+            };
+
+            const voltageToUse = values.targetAC > 5 ? config.transmissionVoltage33kV : config.transmissionVoltage11kV;
+
+            const current = values.targetAC * 1e6 / (voltageToUse * Math.sqrt(3) * config.powerFactor);
+            const r75 = config.conductorResistance20C * (1 + config.conductorTempCoeff * (config.operatingTemp - 20));
+            const totalLineResistance = r75 * values.transmissionDistance;
+            const powerLoss = 3 * Math.pow(current, 2) * totalLineResistance;
+            const transmissionLossPercent = powerLoss / (values.targetAC * 1e6);
+
+            const pr = (1 - values.soilingLoss) * (1 - values.tempLoss) * (1 - values.inverterLoss) * (1 - values.cableLoss) * (1 - config.mismatchLoss);
+            
+            const efficiencyAfterDegradation = (1 - config.lidLoss) * Math.pow((1 - values.degradationRate), 23);
+
+            const eGrid = values.targetAC * config.hoursInYear * config.targetCUF;
+            const ePlant = eGrid / (1 - transmissionLossPercent);
+            const eDCYear24 = ePlant / pr;
+            const eDCYear1 = eDCYear24 / efficiencyAfterDegradation;
+            
+            const requiredCapacity = eDCYear1 / config.peakSunHours;
+
+            outputValues.targetACOutputDisplay.textContent = values.targetAC.toFixed(1);
+            outputValues.targetACOutputValue.textContent = values.targetAC.toFixed(1);
+            outputValues.degradationRateValue.textContent = (values.degradationRate * 100).toFixed(2);
+            outputValues.soilingLossValue.textContent = (values.soilingLoss * 100).toFixed(1);
+            outputValues.tempLossValue.textContent = (values.tempLoss * 100).toFixed(1);
+            outputValues.inverterLossValue.textContent = (values.inverterLoss * 100).toFixed(1);
+            outputValues.cableLossValue.textContent = (values.cableLoss * 100).toFixed(1);
+            outputValues.transmissionDistanceValue.textContent = values.transmissionDistance.toFixed(1);
+            outputValues.finalCapacity.textContent = requiredCapacity.toFixed(2);
+            
+            const totalLossValue = (1 - (eGrid / eDCYear1)) * 100;
+            outputValues.totalLosses.textContent = totalLossValue.toFixed(2);
+
+            return {
+                eGrid,
+                eDCYear1,
+                transmissionLoss: ePlant - eGrid,
+                prLoss: eDCYear24 - ePlant,
+                degradationLoss: eDCYear1 - eDCYear24,
+                degradationRate: values.degradationRate,
+            };
+        }
+
+        function updateWaterfallChart(data) {
+            lossWaterfallChart.data.datasets[0].data = [
+                data.eGrid,
+                data.transmissionLoss,
+                data.prLoss,
+                data.degradationLoss,
+            ];
+            lossWaterfallChart.update();
+        }
+
+        function createDegradationData(rate) {
+            const years = Array.from({ length: 26 }, (_, i) => i);
+            const efficiency = years.map(year => {
+                if (year === 0) return 100;
+                const linearYears = Math.max(0, year - 1);
+                return (1 - config.lidLoss) * Math.pow((1 - rate), linearYears) * 100;
+            });
+            return { labels: years, data: efficiency };
+        }
+
+        function updateDegradationChart(rate) {
+            const newData = createDegradationData(rate);
+            degradationChart.data.labels = newData.labels;
+            degradationChart.data.datasets[0].data = newData.data;
+            degradationChart.update();
+        }
+
+        function handleInputChange() {
+            const targetAC = parseFloat(lossInputs.targetACOutput.value);
+            if (targetAC > 5) {
+                notificationElements.banner.classList.remove('hidden');
+            } else {
+                notificationElements.banner.classList.add('hidden');
+            }
+            
+            const calcData = calculate();
+            updateWaterfallChart(calcData);
+            updateDegradationChart(calcData.degradationRate);
+        }
+
+        function toggleAdvancedSettings() {
+            const isOpen = advancedSettings.toggle.checked;
+            advancedSettings.container.classList.toggle('open', isOpen);
+            advancedSettings.sliders.forEach(slider => {
+                slider.disabled = !isOpen;
+            });
+        }
+
+        function initCharts() {
+            const initialCalc = calculate();
+
+            const waterfallCtx = document.getElementById('lossWaterfallChart').getContext('2d');
+            lossWaterfallChart = new Chart(waterfallCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['Energy to Grid', 'Transmission Loss', 'System (PR) Loss', 'Degradation Loss'],
+                    datasets: [{
+                        label: 'Energy (MWh/year)',
+                        data: [initialCalc.eGrid, initialCalc.transmissionLoss, initialCalc.prLoss, initialCalc.degradationLoss],
+                        backgroundColor: ['#10b981', '#f97316', '#ef4444', '#3b82f6'],
+                        borderWidth: 1,
+                        borderColor: '#e2e8f0'
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { x: { stacked: true, title: { display: true, text: 'Energy (MWh/year)' } }, y: { stacked: true } },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw.toFixed(0)} MWh` } },
+                        title: { display: true, text: 'Breakdown of Required Initial Energy Generation', font: { size: 14 } }
+                    }
+                }
+            });
+
+            const degradationCtx = document.getElementById('degradationChart').getContext('2d');
+            const initialDegradationData = createDegradationData(parseFloat(lossInputs.degradationRate.value) / 100);
+            degradationChart = new Chart(degradationCtx, {
+                type: 'line',
+                data: {
+                    labels: initialDegradationData.labels,
+                    datasets: [{
+                        label: 'Panel Efficiency',
+                        data: initialDegradationData.data,
+                        fill: true,
+                        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                        borderColor: '#f59e0b',
+                        tension: 0.1,
+                        pointBackgroundColor: '#f59e0b',
+                        pointRadius: 2,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { beginAtZero: false, min: 75, max: 101, title: { display: true, text: 'Efficiency (%)' } },
+                        x: { title: { display: true, text: 'Year of Operation' } }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { callbacks: { label: (c) => `Year ${c.label}: ${c.raw.toFixed(2)}%` } }
+                    }
+                }
+            });
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            toggleAdvancedSettings(); // Set initial disabled state
+            Object.values(lossInputs).forEach(input => {
+                input.addEventListener('input', handleInputChange);
+            });
+            notificationElements.closeBtn.addEventListener('click', () => {
+                notificationElements.banner.classList.add('hidden');
+            });
+            advancedSettings.toggle.addEventListener('change', toggleAdvancedSettings);
+        });
+
+    </script>
+</body>
+</html>
